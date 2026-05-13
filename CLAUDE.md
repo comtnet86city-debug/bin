@@ -117,3 +117,8 @@ tail -f ~/ai_projects/logs/clipboard-daemon.log
 ```
 
 輪詢間隔：0.6 秒。日誌：`~/ai_projects/logs/clipboard-daemon.log`。
+
+## 參見
+
+完整工作區環境說明（LLM 模型、外部服務、OpenClaw、所有 repo 清單）：
+`comtnet86city-debug/claude-workspace` → `~/CLAUDE.md`
