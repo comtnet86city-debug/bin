@@ -1,0 +1,124 @@
+#!/bin/bash
+# hm — Hermes model quick-switch
+# Usage: hm [model-alias]  or  hm  (shows menu)
+
+export PYTHONPATH=/home/jwd/.hermes/hermes-agent
+
+declare -A MODELS=(
+    [1]="local-ollama"
+    [2]="hermes3-3b"
+    [3]="qwen-coder"
+    [4]="qwen3-8b"
+    [5]="hermes3-large"
+    [6]="qwen-27b"
+    [7]="gemini-flash"
+    [8]="gpt-5-4"
+    [9]="gpt-5-5"
+)
+
+declare -A MODEL_INFO=(
+    [local-ollama]="qwen3.6:latest      ( 8 tok/s · GPU+RAM · 中文最佳)"
+    [hermes3-3b]="hermes3:3b           (46 tok/s · GPU全速 · 工具使用)"
+    [qwen-coder]="qwen2.5-coder:7b     (12 tok/s · GPU+RAM · 程式碼)"
+    [qwen3-8b]="qwen3:8b              ( 8 tok/s · GPU+RAM · 推理)"
+    [hermes3-large]="hermes3:latest       (40 tok/s · GPU全速 · 均衡)"
+    [qwen-27b]="qwen3.6:27b-q4_K_M   ( 2 tok/s · CPU全量 · 高品質)"
+    [gemini-flash]="gemini-2.5-flash     (雲端     · Google  · 1M context) ☁"
+    [gpt-5-4]="gpt-5.4              (雲端     · OpenAI  · 128K ctx) ☁"
+    [gpt-5-5]="gpt-5.5              (雲端     · OpenAI  · 128K ctx) ☁"
+)
+
+# Cloud providers that need --provider + --model (not -m)
+declare -A CLOUD_MODEL=(
+    [gemini-flash]="gemini-2.5-flash"
+)
+
+# OpenClaw providers (use openclaw tui instead of hermes)
+declare -A OPENCLAW_MODEL=(
+    [gpt-5-4]="gpt-5.4"
+    [gpt-5-5]="gpt-5.5"
+)
+
+# Actual Ollama model names for each provider key
+declare -A MODEL_NAMES=(
+    [local-ollama]="qwen3.6:latest"
+    [hermes3-3b]="hermes3:3b"
+    [qwen-coder]="qwen2.5-coder:7b"
+    [qwen3-8b]="qwen3:8b"
+    [hermes3-large]="hermes3:latest"
+    [qwen-27b]="qwen3.6:27b-q4_K_M"
+)
+
+FALLBACK_CHAIN=("local-ollama" "hermes3-3b" "hermes3-large")
+
+launch() {
+    local provider="$1"
+    local actual_model="${MODEL_NAMES[$provider]}"
+    echo "啟動 [${MODEL_INFO[$provider]}]"
+
+    if [[ -n "${OPENCLAW_MODEL[$provider]}" ]]; then
+        local model="${OPENCLAW_MODEL[$provider]}"
+        # Set default model in openclaw then open web UI
+        openclaw config patch --file - 2>/dev/null <<JSON
+{"models":{"providers":{"openai-codex":{"defaultModel":"${model}"}}}}
+JSON
+        echo "  → OpenClaw Web UI 已開啟 (模型: ${model})"
+        echo "     http://localhost:18789"
+        xdg-open "http://localhost:18789" 2>/dev/null
+        sleep 1
+    elif [[ -n "${CLOUD_MODEL[$provider]}" ]]; then
+        /home/jwd/.local/bin/hermes --provider "$provider" --model "${CLOUD_MODEL[$provider]}"
+        local exit_code=$?
+        # 130 = Ctrl+C (正常結束)，0 = 正常退出
+        if [[ $exit_code -ne 0 && $exit_code -ne 130 ]]; then
+            echo ""
+            echo "  ⚠ ${provider} 退出 (code ${exit_code})，自動切換備援模型..."
+            _fallback_launch
+        fi
+    else
+        # Pass actual Ollama model name (not provider key) to avoid HTTP 404
+        exec /home/jwd/.local/bin/hermes --provider "$provider" -m "$actual_model"
+    fi
+}
+
+_fallback_launch() {
+    for fb in "${FALLBACK_CHAIN[@]}"; do
+        local fb_model="${MODEL_NAMES[$fb]}"
+        echo "  → 嘗試 ${fb} [${MODEL_INFO[$fb]}]"
+        exec /home/jwd/.local/bin/hermes --provider "$fb" -m "$fb_model"
+    done
+    echo "  ✗ 所有備援模型均失敗"
+    exit 1
+}
+
+if [[ -n "$1" ]]; then
+    if [[ -n "${MODEL_INFO[$1]}" ]]; then
+        launch "$1"
+    else
+        echo "未知模型: $1"
+        echo "可用: ${!MODEL_INFO[@]}"
+        exit 1
+    fi
+else
+    echo ""
+    echo "  Hermes 模型選擇"
+    echo "  ─────────────────────────────────────────────"
+    for i in 1 2 3 4 5 6; do
+        key="${MODELS[$i]}"
+        echo "  [$i] ${MODEL_INFO[$key]}"
+    done
+    echo "  ─────────────────────────────────────────────"
+    echo "  [7] ${MODEL_INFO[gemini-flash]}"
+    echo "  [8] ${MODEL_INFO[gpt-5-4]}"
+    echo "  [9] ${MODEL_INFO[gpt-5-5]}"
+    echo "  ─────────────────────────────────────────────"
+    echo -n "  選擇 [1-9，預設 1]: "
+    read -r choice
+    choice="${choice:-1}"
+    key="${MODELS[$choice]}"
+    if [[ -z "$key" ]]; then
+        echo "無效選擇，使用預設 (local-ollama)"
+        key="local-ollama"
+    fi
+    launch "$key"
+fi

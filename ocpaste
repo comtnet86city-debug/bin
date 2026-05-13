@@ -1,0 +1,6 @@
+#!/bin/bash
+# ocpaste — 貼圖分析並送入 OpenClaw
+# 用法: ocpaste [選項] [圖片檔案]
+source "$HOME/ai_agent_env/bin/activate"
+export OPENCLAW_BIN="$HOME/.local/bin/openclaw"
+exec python "$HOME/ai_projects/vision/ocpaste.py" "$@"

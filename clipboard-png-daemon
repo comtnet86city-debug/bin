@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""
+Clipboard PNG daemon: watches X11 clipboard and auto-converts BMP to PNG.
+Runs in background. Start once at login via autostart.
+"""
+import subprocess
+import time
+import sys
+import os
+from io import BytesIO
+
+DISPLAY = os.environ.get("DISPLAY", ":10.0")
+INTERVAL = 0.6
+
+
+def xclip(args, input_data=None):
+    env = {"DISPLAY": DISPLAY}
+    return subprocess.run(
+        ["xclip"] + args,
+        capture_output=True,
+        input=input_data,
+        env={**os.environ, **env},
+    )
+
+
+def get_clipboard_timestamp():
+    r = xclip(["-selection", "clipboard", "-t", "TIMESTAMP", "-o"])
+    return r.stdout if r.returncode == 0 else None
+
+
+def get_clipboard_targets():
+    r = xclip(["-selection", "clipboard", "-t", "TARGETS", "-o"])
+    if r.returncode != 0:
+        return []
+    return r.stdout.decode(errors="ignore").split()
+
+
+def convert_bmp_to_png():
+    r = xclip(["-selection", "clipboard", "-t", "image/bmp", "-o"])
+    if r.returncode != 0 or not r.stdout:
+        return False
+    try:
+        from PIL import Image, ImageFile
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        img = Image.open(BytesIO(r.stdout))
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        png_data = buf.getvalue()
+    except Exception as e:
+        print(f"[daemon] convert error: {e}", flush=True)
+        return False
+
+    proc = subprocess.Popen(
+        ["xclip", "-selection", "clipboard", "-t", "image/png", "-i"],
+        stdin=subprocess.PIPE,
+        env={**os.environ, "DISPLAY": DISPLAY},
+    )
+    proc.communicate(input=png_data)
+    if proc.returncode == 0:
+        print(f"[daemon] BMP→PNG {len(r.stdout)//1024}KB→{len(png_data)//1024}KB", flush=True)
+        return True
+    return False
+
+
+def main():
+    print("[daemon] clipboard-png-daemon started", flush=True)
+    last_ts = None
+
+    while True:
+        try:
+            ts = get_clipboard_timestamp()
+            if ts and ts != last_ts:
+                last_ts = ts
+                targets = get_clipboard_targets()
+                if "image/bmp" in targets and "image/png" not in targets:
+                    convert_bmp_to_png()
+        except Exception as e:
+            print(f"[daemon] error: {e}", flush=True)
+        time.sleep(INTERVAL)
+
+
+if __name__ == "__main__":
+    main()

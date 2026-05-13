@@ -1,0 +1,76 @@
+#!/bin/bash
+# 啟動所有 AI 服務：Hermes Dashboard + Docker 容器
+echo "▶ 啟動 AI 服務..."
+
+# 1. Docker 容器（自動重啟策略已設定，開機後只需 ensure running）
+for name in searxng open-webui n8n; do
+    if docker ps --format '{{.Names}}' | grep -q "^${name}$"; then
+        echo "  ✓ ${name} 已在運行"
+    else
+        docker start "$name" &>/dev/null && echo "  ▶ ${name} 已啟動" || echo "  ✗ ${name} 啟動失敗"
+    fi
+done
+
+# Langfuse（需先啟動 db，再啟動 langfuse）
+if docker ps --format '{{.Names}}' | grep -q "^langfuse$"; then
+    echo "  ✓ Langfuse 已在運行（:3000）"
+else
+    cd "$HOME/langfuse" && docker compose up -d &>/dev/null && echo "  ▶ Langfuse 已啟動（:3000）" || echo "  ✗ Langfuse 啟動失敗"
+fi
+
+# 設計協作平台（Penpot）
+if docker ps --format '{{.Names}}' | grep -q "^penpot-frontend$"; then
+    echo "  ✓ 設計協作平台 已在運行（:9001）"
+else
+    cd "$HOME/penpot" && docker compose up -d &>/dev/null && echo "  ▶ 設計協作平台 已啟動（:9001）" || echo "  ✗ 設計協作平台 啟動失敗"
+fi
+
+# 設計協作倉庫（Gitea）
+if docker ps --format '{{.Names}}' | grep -q "^gitea$"; then
+    echo "  ✓ 設計協作倉庫 已在運行（:3001）"
+else
+    cd "$HOME/gitea" && docker compose up -d &>/dev/null && echo "  ▶ 設計協作倉庫 已啟動（:3001）" || echo "  ✗ 設計協作倉庫 啟動失敗"
+fi
+
+# 2. ComfyUI（背景啟動，模型已就緒）
+if curl -s --max-time 2 http://localhost:8188/system_stats &>/dev/null; then
+    echo "  ✓ ComfyUI 已在運行（:8188）"
+else
+    echo "  ▶ 啟動 ComfyUI..."
+    bash "$HOME/ComfyUI/start.sh" &>/dev/null &
+fi
+
+# 3. Claude Code Bridge
+if curl -s --max-time 2 http://localhost:19001/health &>/dev/null; then
+    echo "  ✓ Claude Bridge 已在運行（:19001）"
+else
+    echo "  ▶ 啟動 Claude Bridge..."
+    bash "$HOME/ai_projects/claude_bridge/start.sh" &>/dev/null
+fi
+
+# 4. Hermes Dashboard
+if curl -s --max-time 2 http://localhost:7860/api/system &>/dev/null; then
+    echo "  ✓ Hermes Dashboard 已在運行（:7860）"
+else
+    echo "  ▶ 啟動 Hermes Dashboard..."
+    source "$HOME/ai_agent_env/bin/activate"
+    cd "$HOME/hermes-dashboard"
+    nohup uvicorn main:app --host 0.0.0.0 --port 7860 >> ~/.hermes-dashboard.log 2>&1 &
+    for i in $(seq 1 10); do
+        sleep 2
+        curl -s --max-time 1 http://localhost:7860/api/system &>/dev/null && break
+    done
+    echo "  ✓ Hermes Dashboard 已啟動（:7860）"
+fi
+
+echo ""
+echo "服務清單："
+echo "  Hermes Dashboard  → http://localhost:7860"
+echo "  Open-WebUI        → http://localhost:8080"
+echo "  n8n 工作流         → http://localhost:5678"
+echo "  SearXNG 搜尋       → http://localhost:8888"
+echo "  ComfyUI            → http://localhost:8188"
+echo "  Langfuse 監控       → http://localhost:3000"
+echo "  Claude Bridge      → http://localhost:19001"
+echo "  設計協作平台        → http://localhost:9001"
+echo "  設計協作倉庫        → http://localhost:3001"
